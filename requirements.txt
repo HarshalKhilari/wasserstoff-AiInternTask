@@ -1,0 +1,11 @@
+pymongo
+PyPDF2
+transformers
+sklearn
+PyMuPDF
+pandas
+matplotlib
+numpy
+psutil
+gc
+keybert
