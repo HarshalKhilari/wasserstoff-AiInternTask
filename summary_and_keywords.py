@@ -12,32 +12,23 @@ from mongoDB_setup import metadata_collection
 import gc
 from transformers import AutoTokenizer
 from keybert import KeyBERT
-
-
-# Function to count tokens
-def count_tokens(text, tokenizer):
-    """Counts the number of tokens in the given text using the specified tokenizer."""
-    try:
-        # Check if text is None or empty
-        if text is None or text.strip() == "":
-            logging.warning("Received empty text for token counting.")
-            return 0  # Return 0 for empty text
-
-        # Count tokens
-        token_cnt = len(tokenizer.encode(text, truncation=False))
-        return token_cnt
-    except Exception as e:
-        logging.error(f"Error counting tokens: {str(e)}")
-        return 0  # Return 0 in case of an error
+from itertools import permutations
 
 
 # Main function for summary and keyword extraction
 def summary_keyword_extract_concurrently(file_name_list):
     """Extracts text, summarizes, and extracts keywords for multiple PDFs concurrently."""
-    cpus = os.cpu_count()   # Getting total virtual CPUs
-    ncpu = max(1, cpus - 6) if cpus > 6 else 1  # Leaving 1 CPU for other processes
+
+    # Get total non-hardware reserved memory in bytes
+    non_reserved_memory = psutil.virtual_memory().total
+    # Calculate the maximum number of workers based on 60% of non-reserved memory
+    max_memory_for_tasks = 0.6 * non_reserved_memory  # 60% of non-hardware reserved memory
+    max_workers = max(1, int(max_memory_for_tasks / (1024 ** 3)))  # Convert bytes to GB and ensure at least 1 worker
+
+    logging.info(f"Total Memory: {non_reserved_memory / (1024 ** 3):.2f} GB")
+    logging.info(f"Max Workers set to: {max_workers}")
     
-    with ProcessPoolExecutor(max_workers=ncpu) as executor:
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_single_pdf, file_name): file_name for file_name in file_name_list}
         for future in as_completed(futures):
             file_name = futures[future]
@@ -92,7 +83,6 @@ def process_single_pdf(file_name):
                 "summary_start_time": summary_start_time,
                 "summary_end_time": summary_end_time,
                 "total_summary_time": summary_end_time - summary_start_time,
-                "cpu_before": cpu_before,
                 "cpu_after": cpu_after,
                 "memory_before": memory_before,
                 "memory_after": memory_after,
@@ -191,30 +181,16 @@ def summarize_text(txt, file_name):
         distilbart_tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
         token_count = count_tokens(txt, distilbart_tokenizer)  # Assuming distilbart for initial token counting
 
-        # Step 2: Select the model and tokenizer based on token count
-        if token_count < 4096:  # Small text
-            model_name = "sshleifer/distilbart-cnn-12-6"
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            max_length = 256
-            min_length = 30
-        elif token_count < 12288:  # Medium text
-            model_name = "sshleifer/distilbart-cnn-12-6"
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            max_length = 768
-            min_length = 30
-        else:  # Large text
-            model_name = "facebook/bart-base"
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            max_length = 1536
-            min_length = 30
-
-        logging.info(f"Selected model: {model_name} for file {file_name}, based on token count: {token_count}.")
+        model_name = "sshleifer/distilbart-cnn-12-6"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        max_length = 96
+        min_length = 4
 
         # Step 3: Initialize the summarizer with the selected model
         summarizer = pipeline("summarization", model=model_name, tokenizer=tokenizer)
 
         # Split the text into manageable chunks for summarization
-        max_chunk_length = 640
+        max_chunk_length = 512
         text_chunks = split_text_by_length(txt, max_chunk_length, file_name)
         logging.info(f"Total number of chunks in file {file_name}: {len(text_chunks)}")
 
@@ -236,6 +212,23 @@ def summarize_text(txt, file_name):
     except Exception as err:
         logging.error(f"Error during summarization for file {file_name}: {str(err)}")
         raise
+
+
+# Function to count tokens
+def count_tokens(text, tokenizer):
+    """Counts the number of tokens in the given text using the specified tokenizer."""
+    try:
+        # Check if text is None or empty
+        if text is None or text.strip() == "":
+            logging.warning("Received empty text for token counting.")
+            return 0  # Return 0 for empty text
+
+        # Count tokens
+        token_cnt = len(tokenizer.encode(text, truncation=False))
+        return token_cnt
+    except Exception as e:
+        logging.error(f"Error counting tokens: {str(e)}")
+        return 0  # Return 0 in case of an error
 
 
 def split_text_by_length(txt, max_length, file_name):
@@ -270,19 +263,46 @@ def summarize_chunk(chunk, summarizer, chunk_index, file_name, max_length, min_l
 
 
 def extract_keywords(text, file_name, num_keywords=10):
-    """Extracts keywords using the KeyBERT model."""
+    """Extracts keywords using the KeyBERT model and avoids repeated permutations of word combinations."""
     try:
         logging.info(f"Extracting {num_keywords} keywords from text for file {file_name} using KeyBERT.")
 
         kw_model = KeyBERT()
-        keywords = kw_model.extract_keywords(text, keyphrase_ngram_range=(1, 1), stop_words='english',
-                                             top_n=num_keywords)
-        top_keywords = [kw[0] for kw in keywords]
+        # Extract up to trigrams (keyphrase_ngram_range=(1, 3))
+        keywords = kw_model.extract_keywords(text, keyphrase_ngram_range=(1, 3), stop_words='english',
+                                             top_n=num_keywords * 3)  # Get more to filter later
 
-        logging.info(f"Extracted keywords for file {file_name}: {top_keywords}")
-        return top_keywords
+        # Remove permutations (e.g., 'word1 word2' and 'word2 word1') and limit word occurrences
+        unique_keywords = []
+        seen_phrases = set()
+        word_count = {}
+
+        for kw in keywords:
+            phrase = kw[0]
+            words = phrase.split()
+            sorted_words = tuple(sorted(words))  # Sort words to avoid permutations
+
+            # Check if the phrase is unique and count word occurrences
+            if sorted_words not in seen_phrases:
+                seen_phrases.add(sorted_words)
+
+                # Count the occurrences of each word in the phrase
+                for word in words:
+                    word_count[word] = word_count.get(word, 0) + 1
+
+                # Check if adding this phrase would exceed the limit for any word
+                if all(word_count[word] <= 3 for word in words):
+                    unique_keywords.append(phrase)
+
+                # Stop if we've collected enough keywords
+                if len(unique_keywords) >= num_keywords:
+                    break
+
+        logging.info(f"Extracted unique keywords for file {file_name}: {unique_keywords}")
+        return unique_keywords
 
     except Exception as err:
         logging.error(f"Error extracting keywords for file {file_name} using KeyBERT: {str(err)}")
         raise
+
 

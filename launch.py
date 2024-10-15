@@ -2,6 +2,7 @@ import logging
 import log_config
 from talk2db import check_if_new_files
 from reporting import generate_report
+from mongoDB_setup import *
 
 
 def launch():

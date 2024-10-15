@@ -1,11 +1,10 @@
 pymongo
 PyPDF2
 transformers
-sklearn
+scikit-learn
 PyMuPDF
 pandas
 matplotlib
 numpy
 psutil
-gc
 keybert

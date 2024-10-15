@@ -27,6 +27,22 @@ def generate_report():
     # Create a new PDF document
     with PdfPages('performance_report.pdf') as pdf:
 
+        # Plot of PDF Token counts
+        # Set the figure size
+        plt.figure(figsize=(10, 6))
+        # Create the bar plot using the truncated file names
+        plt.bar(df['short_name'], df['token_count'], color='blue')
+        # Set plot titles and labels
+        plt.title('Token Count')
+        plt.xlabel('File Name')
+        plt.ylabel('Count')
+        # Rotate x-axis labels to avoid overlap, reduce font size
+        plt.xticks(rotation=45, ha='right', fontsize=10)
+        # Adjust layout to fit labels
+        plt.tight_layout()
+        # Save the first plot to the PDF
+        pdf.savefig()
+        plt.close()
 
         # Plot of PDF Extraction Time
         # Set the figure size
@@ -47,26 +63,24 @@ def generate_report():
 
         # Plot of Keyword Extraction Time
         plt.figure(figsize=(10, 6))  # Set the figure size
-        plt.bar(df['short_name'], df['total_keyword_time'], color='orange')
+        plt.bar(df['short_name'], df['total_keyword_time']/60, color='orange')
         plt.title('Keyword Extraction Time')
         plt.xlabel('File Name')
-        plt.ylabel('Time (seconds)')
+        plt.ylabel('Time (minutes)')
         plt.xticks(rotation=45, ha='right', fontsize=10)
         plt.tight_layout()
-
         # Save the second plot to the PDF
         pdf.savefig()
         plt.close()
 
         # Plot of Summary Time
         plt.figure(figsize=(10, 6))  # Set the figure size
-        plt.bar(df['short_name'], df['total_summary_time'], color='green')
+        plt.bar(df['short_name'], df['total_summary_time']/60, color='green')
         plt.title('Summary Time')
         plt.xlabel('File Name')
-        plt.ylabel('Time (seconds)')
+        plt.ylabel('Time (minutes)')
         plt.xticks(rotation=45, ha='right', fontsize=10)
         plt.tight_layout()
-
         # Save the third plot to the PDF
         pdf.savefig()
         plt.close()
@@ -85,7 +99,6 @@ def generate_report():
         plt.xticks(rotation=45, ha='right', fontsize=10)
         # Adjust layout to fit labels
         plt.tight_layout()
-
         # Save the second plot to the PDF
         pdf.savefig()
         plt.close()
@@ -105,11 +118,20 @@ def generate_report():
         plt.xticks(rotation=45, ha='right', fontsize=10)
         # Adjust layout to fit labels
         plt.tight_layout()
-
         # Save the third plot to the PDF
         pdf.savefig()
         plt.close()
 
+        # Plot of Summary Time vs. Token Count
+        plt.figure(figsize=(10, 6))  # Set the figure size
+        plt.scatter(df['token_count'], df['total_summary_time'], color='blue', marker='o')
+        plt.title('Relation between Summary Time and Token Count')
+        plt.xlabel('Token Count')
+        plt.ylabel('Summary Time (seconds)')
+        plt.grid(True)
+        # Save the plot to the PDF
+        pdf.savefig()
+        plt.close()
 
         # Plot of Concurrency Visualization (Start and End Times)
         # Subtract the minimum y value from both 'pdf_extraction_start_time' and 'summary_end_time'
@@ -138,7 +160,6 @@ def generate_report():
         plt.legend()
         # Adjust layout to fit labels
         plt.tight_layout()
-
         # Save the fourth plot to the PDF
         pdf.savefig()
         plt.close()

@@ -1,5 +1,4 @@
 from pymongo import MongoClient
-import gridfs
 import logging
 import log_config
 
